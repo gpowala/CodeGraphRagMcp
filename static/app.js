@@ -27,6 +27,10 @@ const elements = {
     directoryList: document.getElementById('directoryList'),
     addDirectoryBtn: document.getElementById('addDirectoryBtn'),
     
+    // Logs
+    logViewer: document.getElementById('logViewer'),
+    clearLogsBtn: document.getElementById('clearLogsBtn'),
+    
     // Search
     searchInput: document.getElementById('searchInput'),
     searchBtn: document.getElementById('searchBtn'),
@@ -54,6 +58,10 @@ async function init() {
     pollStatus();
     setInterval(pollStatus, 3000);
     
+    // Start polling for logs (more frequently during indexing)
+    pollLogs();
+    setInterval(pollLogs, 1000);
+    
     // Load directories
     await loadDirectories();
     
@@ -63,6 +71,7 @@ async function init() {
     elements.closeModal.addEventListener('click', closeDirectoryModal);
     elements.cancelBrowse.addEventListener('click', closeDirectoryModal);
     elements.selectDirectory.addEventListener('click', selectCurrentDirectory);
+    elements.clearLogsBtn.addEventListener('click', clearLogs);
     elements.searchBtn.addEventListener('click', performSearch);
     elements.searchInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') performSearch();
@@ -374,6 +383,16 @@ function renderSearchResults(data) {
 async function triggerReindex() {
     try {
         elements.reindexBtn.disabled = true;
+        
+        // Immediately reset UI counts for instant feedback
+        elements.totalFiles.textContent = '0';
+        elements.indexedFiles.textContent = '0';
+        elements.entitiesCount.textContent = '0';
+        elements.chunksCount.textContent = '0';
+        elements.progressContainer.classList.add('active');
+        elements.progressFill.style.width = '0%';
+        elements.progressText.textContent = 'Starting re-index...';
+        
         const response = await fetch('/api/reindex', { method: 'POST' });
         
         if (!response.ok) throw new Error('Reindex failed');
@@ -383,7 +402,10 @@ async function triggerReindex() {
         console.error('Reindex error:', error);
         showToast('Failed to start re-indexing', 'error');
     } finally {
-        elements.reindexBtn.disabled = false;
+        // Re-enable after a short delay
+        setTimeout(() => {
+            elements.reindexBtn.disabled = false;
+        }, 2000);
     }
 }
 
@@ -403,6 +425,72 @@ function showToast(message, type = 'info') {
         toast.style.transform = 'translateX(100%)';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+// =============================================================================
+// Indexing Logs
+// =============================================================================
+
+let lastLogCount = 0;
+let isAutoScrollEnabled = true;
+
+async function pollLogs() {
+    try {
+        const response = await fetch('/api/logs');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const logs = data.logs || [];
+        
+        // Only update if there are new logs
+        if (logs.length !== lastLogCount) {
+            renderLogs(logs);
+            lastLogCount = logs.length;
+        }
+    } catch (error) {
+        console.error('Log poll error:', error);
+    }
+}
+
+function renderLogs(logs) {
+    if (logs.length === 0) {
+        elements.logViewer.innerHTML = `
+            <div class="log-empty">
+                <p>No indexing activity yet</p>
+                <p class="hint">Logs will appear here during indexing</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Get scroll position before update
+    const wasScrolledToBottom = isScrolledToBottom(elements.logViewer);
+    
+    // Render last 50 logs (most recent)
+    const recentLogs = logs.slice(-50);
+    elements.logViewer.innerHTML = recentLogs.map(log => {
+        const time = new Date(log.time);
+        const timeStr = time.toLocaleTimeString();
+        return `<div class="log-entry">[${timeStr}] ${escapeHtml(log.message)}</div>`;
+    }).join('');
+    
+    // Auto-scroll to bottom if was already at bottom or new content
+    if (wasScrolledToBottom || isAutoScrollEnabled) {
+        elements.logViewer.scrollTop = elements.logViewer.scrollHeight;
+    }
+}
+
+function isScrolledToBottom(element) {
+    return element.scrollHeight - element.clientHeight <= element.scrollTop + 50;
+}
+
+function clearLogs() {
+    lastLogCount = 0;
+    elements.logViewer.innerHTML = `
+        <div class="log-empty">
+            <p>Logs cleared</p>
+        </div>
+    `;
 }
 
 // =============================================================================

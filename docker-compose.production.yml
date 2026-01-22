@@ -1,0 +1,97 @@
+# C++ Graph-RAG MCP Server - Production Docker Compose
+# This version uses pre-built images from Docker Hub
+# Compatible with both Docker and Podman (via podman-compose)
+#
+# Usage:
+#   docker-compose -f docker-compose.production.yml up -d
+#   podman-compose -f docker-compose.production.yml up -d
+
+services:
+  postgres:
+    image: docker.io/pgvector/pgvector:pg18-trixie
+    container_name: cpp-rag-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-cpp_codebase}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    ports:
+      - "${DB_PORT_EXTERNAL:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-cpp_codebase}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - cpp-rag-network
+
+  mcp-server:
+    # Use pre-built image from Docker Hub
+    # Replace YOUR_DOCKERHUB_USERNAME with the actual username
+    image: ${DOCKER_IMAGE:-YOUR_DOCKERHUB_USERNAME/cpp-graph-rag-mcp:latest}
+    container_name: cpp-rag-mcp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database connection
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-cpp_codebase}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      
+      # Monitored paths (comma-separated, relative to mounted volume)
+      # Configure via web UI or set here
+      MONITORED_PATHS: ${MONITORED_PATHS:-}
+      
+      # Embedding model (defaults to a small, fast model)
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      
+      # Config path for persistent settings
+      CONFIG_PATH: /app/config
+      
+      # Python unbuffered output
+      PYTHONUNBUFFERED: 1
+    
+    volumes:
+      # Mount your source code directories here (read-only for safety)
+      # Option 1: Mount specific directory
+      # - /path/to/your/cpp/project:/code:ro
+      
+      # Option 2: Mount entire drive and configure via web UI
+      # Windows example: - C:/:/host:ro
+      # Linux example: - /home:/host:ro
+      - ${HOST_PATH:-./example_code}:/host:ro
+      
+      # Persistent configuration storage
+      - cpp_rag_config:/app/config
+    
+    ports:
+      # MCP API and Web UI
+      - "${MCP_PORT:-8000}:8000"
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    
+    networks:
+      - cpp-rag-network
+
+volumes:
+  postgres_data:
+    driver: local
+  cpp_rag_config:
+    driver: local
+
+networks:
+  cpp-rag-network:
+    driver: bridge

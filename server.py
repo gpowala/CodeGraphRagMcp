@@ -57,6 +57,10 @@ indexing_status = {
     "chunks_count": 0
 }
 
+# Indexing activity log (keep last 100 entries)
+indexing_log = []
+MAX_LOG_ENTRIES = 100
+
 # Configuration from environment
 DB_HOST = os.getenv("DB_HOST", "postgres")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
@@ -356,9 +360,57 @@ async def quick_search(request: Dict[str, Any]):
 
 @app.post("/api/reindex")
 async def trigger_reindex():
-    """Manually trigger re-indexing"""
-    asyncio.create_task(initial_indexing())
-    return {"status": "indexing_started"}
+    """Manually trigger re-indexing - clears all data first"""
+    global indexing_status, indexing_log
+    
+    try:
+        # Set indexing flag FIRST to prevent status polling from overwriting
+        indexing_status["is_indexing"] = True
+        
+        # Clear all data from database
+        async with db_pool.acquire() as conn:
+            print("Clearing all indexed data...")
+            add_log_entry("🗑️ Clearing all indexed data...")
+            await conn.execute("DELETE FROM code_chunks")
+            await conn.execute("DELETE FROM relationships")
+            await conn.execute("DELETE FROM entities")
+            await conn.execute("DELETE FROM files")
+            print("All data cleared successfully")
+            add_log_entry("✓ All data cleared successfully")
+        
+        # Reset indexing status
+        indexing_status["total_files"] = 0
+        indexing_status["indexed_files"] = 0
+        indexing_status["pending_files"] = 0
+        indexing_status["current_file"] = ""
+        indexing_status["entities_count"] = 0
+        indexing_status["relationships_count"] = 0
+        indexing_status["chunks_count"] = 0
+        
+        # Start fresh indexing
+        add_log_entry("🔄 Starting fresh indexing...")
+        asyncio.create_task(initial_indexing())
+        
+        return {"status": "indexing_started", "message": "All data cleared, reindexing started"}
+    except Exception as e:
+        print(f"Error during reindex: {e}")
+        add_log_entry(f"❌ Error during reindex: {e}")
+        indexing_status["is_indexing"] = False
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/logs")
+async def get_indexing_logs():
+    """Get recent indexing activity logs"""
+    return {"logs": indexing_log}
+
+def add_log_entry(message: str):
+    """Add entry to indexing log with timestamp"""
+    global indexing_log
+    timestamp = datetime.now(timezone.utc).isoformat()
+    indexing_log.append({"time": timestamp, "message": message})
+    # Keep only last MAX_LOG_ENTRIES
+    if len(indexing_log) > MAX_LOG_ENTRIES:
+        indexing_log = indexing_log[-MAX_LOG_ENTRIES:]
 
 # =============================================================================
 # MCP Endpoints
@@ -1163,6 +1215,7 @@ async def initial_indexing():
     global indexing_status
     
     print("Starting initial indexing...")
+    add_log_entry("📂 Scanning for C++ files...")
     indexing_status["is_indexing"] = True
     await asyncio.sleep(1)  # Let server start up
     
@@ -1170,6 +1223,7 @@ async def initial_indexing():
     for base_path in monitoring_paths:
         if not base_path.exists():
             print(f"Warning: Path does not exist: {base_path}")
+            add_log_entry(f"⚠️ Path does not exist: {base_path}")
             continue
         
         for ext in ["*.cpp", "*.cc", "*.cxx", "*.hpp", "*.h", "*.hxx"]:
@@ -1177,16 +1231,24 @@ async def initial_indexing():
     
     indexing_status["total_files"] = len(all_files)
     print(f"Found {len(all_files)} C++ files to index")
+    add_log_entry(f"📊 Found {len(all_files)} C++ files to index")
     
-    # Index in batches
-    batch_size = 50
-    for i in range(0, len(all_files), batch_size):
-        batch = all_files[i:i+batch_size]
-        indexing_status["current_file"] = str(batch[0]) if batch else ""
-        await index_files(batch)
-        indexing_status["indexed_files"] = min(i+batch_size, len(all_files))
-        print(f"Indexed {min(i+batch_size, len(all_files))}/{len(all_files)} files")
+    # Index files one by one for better logging
+    for i, file_path in enumerate(all_files):
+        indexing_status["current_file"] = str(file_path)
+        await index_files([file_path])
+        indexing_status["indexed_files"] = i + 1
+        
+        # Add log entry for each file
+        short_path = str(file_path).replace('/host/', '')
+        add_log_entry(f"✓ Indexed {short_path}")
+        
+        # Progress message every 10 files
+        if (i + 1) % 10 == 0:
+            print(f"Indexed {i + 1}/{len(all_files)} files")
     
+    print(f"Indexing complete: {len(all_files)} files")
+    add_log_entry(f"🎉 Indexing complete! Processed {len(all_files)} files")
     indexing_status["is_indexing"] = False
     indexing_status["last_indexed"] = datetime.now(timezone.utc).isoformat()
     indexing_status["current_file"] = ""
