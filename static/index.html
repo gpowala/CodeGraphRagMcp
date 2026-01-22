@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C++ Graph-RAG MCP Server</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="32" height="32" rx="8" fill="url(#grad1)"/>
+                    <path d="M8 16L12 12M12 12L16 16M12 12V22" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M20 10L24 14M24 14L20 18M24 14H16" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <defs>
+                        <linearGradient id="grad1" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#6366f1"/>
+                            <stop offset="1" stop-color="#8b5cf6"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <h1>C++ Graph-RAG</h1>
+            </div>
+            <div class="header-status">
+                <span class="status-indicator" id="serverStatus"></span>
+                <span id="serverStatusText">Connecting...</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Status Panel -->
+            <section class="panel status-panel">
+                <div class="panel-header">
+                    <h2>Indexing Status</h2>
+                    <button class="btn btn-secondary" id="reindexBtn" title="Trigger re-indexing">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M23 4v6h-6M1 20v-6h6"/>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                        </svg>
+                        Re-index
+                    </button>
+                </div>
+                <div class="status-grid">
+                    <div class="status-card">
+                        <div class="status-value" id="totalFiles">-</div>
+                        <div class="status-label">Total Files</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="status-value" id="indexedFiles">-</div>
+                        <div class="status-label">Indexed</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="status-value" id="entitiesCount">-</div>
+                        <div class="status-label">Entities</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="status-value" id="chunksCount">-</div>
+                        <div class="status-label">Chunks</div>
+                    </div>
+                </div>
+                
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-text">
+                        <span id="progressText">Indexing...</span>
+                        <span id="currentFile"></span>
+                    </div>
+                </div>
+                
+                <div class="last-indexed">
+                    <span>Last indexed: </span>
+                    <span id="lastIndexed">Never</span>
+                </div>
+            </section>
+
+            <!-- Directory Configuration -->
+            <section class="panel directories-panel">
+                <div class="panel-header">
+                    <h2>Monitored Directories</h2>
+                    <button class="btn btn-primary" id="addDirectoryBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        Add Directory
+                    </button>
+                </div>
+                
+                <div class="directory-list" id="directoryList">
+                    <div class="empty-state">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <p>No directories configured</p>
+                        <p class="hint">Click "Add Directory" to select folders to index</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Quick Search -->
+            <section class="panel search-panel">
+                <div class="panel-header">
+                    <h2>Quick Search</h2>
+                </div>
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Search code patterns, functions, classes..." />
+                    <button class="btn btn-primary" id="searchBtn">Search</button>
+                </div>
+                <div class="search-results" id="searchResults">
+                    <div class="empty-state small">
+                        <p>Enter a query to search your codebase</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Directory Browser Modal -->
+        <div class="modal" id="directoryModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Select Directory</h3>
+                    <button class="modal-close" id="closeModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="breadcrumb" id="breadcrumb">
+                        <span class="breadcrumb-item" data-path="/host">/host</span>
+                    </div>
+                    <div class="file-browser" id="fileBrowser">
+                        <div class="loading">Loading...</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="cancelBrowse">Cancel</button>
+                    <button class="btn btn-primary" id="selectDirectory" disabled>Select This Directory</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Container -->
+        <div class="toast-container" id="toastContainer"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
